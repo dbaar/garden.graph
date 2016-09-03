@@ -61,8 +61,7 @@ from kivy.properties import NumericProperty, BooleanProperty,\
     BoundedNumericProperty, StringProperty, ListProperty, ObjectProperty,\
     DictProperty, AliasProperty
 from kivy.clock import Clock
-from kivy.graphics import Mesh, Color, Rectangle
-from kivy.graphics import Fbo
+from kivy.graphics import Mesh, Color, Rectangle, Line
 from kivy.graphics.transformation import Matrix
 from kivy.graphics.texture import Texture
 from kivy.event import EventDispatcher
@@ -145,42 +144,18 @@ class Graph(Widget):
     label_options = DictProperty()
     '''Label options that will be passed to `:class:`kivy.uix.Label`.
     '''
-    
-    _with_stencilbuffer = BooleanProperty(True)
-    '''Whether :class:`Graph`'s FBO should use FrameBuffer (True) or not (False).
-    
-    .. warning:: This property is internal and so should be used with care. It can break
-    some other graphic instructions used by the :class:`Graph`, for example you can have
-    problems when drawing :class:`SmoothLinePlot` plots, so use it only when you know
-    what exactly you are doing.
-    
-    :data:`_with_stencilbuffer` is a :class:`~kivy.properties.BooleanProperty`, defaults
-    to True.'''
 
     def __init__(self, **kwargs):
         super(Graph, self).__init__(**kwargs)
 
         with self.canvas:
-            self._fbo = Fbo(size=self.size, with_stencilbuffer=self._with_stencilbuffer)
-
-        with self._fbo:
             self._background_color = Color(*self.background_color)
             self._background_rect = Rectangle(size=self.size)
+            self._plot_area = StencilView()
             self._mesh_ticks_color = Color(*self.tick_color)
             self._mesh_ticks = Mesh(mode='lines')
-            self._mesh_rect_color = Color(*self.border_color)
-            self._mesh_rect = Mesh(mode='line_strip')
-
-        with self.canvas:
-            Color(1, 1, 1)
-            self._fbo_rect = Rectangle(size=self.size, texture=self._fbo.texture)
-
-        mesh = self._mesh_rect
-        mesh.vertices = [0] * (5 * 4)
-        mesh.indices = range(5)
-
-        self._plot_area = StencilView()
-        self.add_widget(self._plot_area)
+            self._frame_color = Color(*self.border_color)
+            self._frame = Line(rectangle=(self.x, self.y, self.width, self.height), width=1)
 
         t = self._trigger = Clock.create_trigger(self._redraw_all)
         ts = self._trigger_size = Clock.create_trigger(self._redraw_size)
@@ -194,22 +169,6 @@ class Graph(Widget):
                   font_size=t, label_options=t)
         self.bind(tick_color=tc, background_color=tc, border_color=tc)
         self._trigger()
-
-    def add_widget(self, widget):
-        if widget is self._plot_area:
-            canvas = self.canvas
-            self.canvas = self._fbo
-        super(Graph, self).add_widget(widget)
-        if widget is self._plot_area:
-            self.canvas = canvas
-
-    def remove_widget(self, widget):
-        if widget is self._plot_area:
-            canvas = self.canvas
-            self.canvas = self._fbo
-        super(Graph, self).remove_widget(widget)
-        if widget is self._plot_area:
-            self.canvas = canvas
 
     def _get_ticks(self, major, minor, log, s_min, s_max):
         if major and s_max > s_min:
@@ -304,6 +263,12 @@ class Graph(Widget):
             points_minor = []
         return points_major, points_minor
 
+    def _format_xlabel_text(self, value):
+        return str(self.precision % value)
+
+    def _format_ylabel_text(self, value):
+        return str(self.precision % value)
+
     def _update_labels(self):
         xlabel = self._xlabel
         ylabel = self._ylabel
@@ -319,7 +284,6 @@ class Graph(Widget):
         ymin = self.ymin
         ymax = self.ymax
         xmin = self.xmin
-        precision = self.precision
         x_overlap = False
         y_overlap = False
         # set up x and y axis labels
@@ -346,7 +310,7 @@ class Graph(Widget):
             # horizontal size of the largest tick label, to have enough room
             funcexp = exp10 if self.ylog else identity
             funclog = log10 if self.ylog else identity
-            ylabels[0].text = precision % funcexp(ypoints[0])
+            ylabels[0].text = self._format_ylabel_text(funcexp(ypoints[0]))
             ylabels[0].texture_update()
             y1 = ylabels[0].texture_size
             y_start = y_next + (padding + y1[1] if len(xlabels) and xlabel_grid
@@ -359,7 +323,7 @@ class Graph(Widget):
             y_start -= y1[1] / 2.
             y1 = y1[0]
             for k in range(len(ylabels)):
-                ylabels[k].text = precision % funcexp(ypoints[k])
+                ylabels[k].text = self._format_ylabel_text(funcexp(ypoints[k]))
                 ylabels[k].texture_update()
                 ylabels[k].size = ylabels[k].texture_size
                 y1 = max(y1, ylabels[k].texture_size[0])
@@ -373,19 +337,19 @@ class Graph(Widget):
             funcexp = exp10 if self.xlog else identity
             funclog = log10 if self.xlog else identity
             # find the distance from the end that'll fit the last tick label
-            xlabels[0].text = precision % funcexp(xpoints[-1])
+            xlabels[0].text = self._format_xlabel_text(funcexp(xpoints[-1]))
             xlabels[0].texture_update()
             xextent = x + width - xlabels[0].texture_size[0] / 2. - padding
             # find the distance from the start that'll fit the first tick label
             if not x_next:
-                xlabels[0].text = precision % funcexp(xpoints[0])
+                xlabels[0].text = self._format_label_text(funcexp(xpoints[0]))
                 xlabels[0].texture_update()
                 x_next = padding + xlabels[0].texture_size[0] / 2.
             xmin = funclog(xmin)
             ratio = (xextent - x_next) / float(funclog(self.xmax) - xmin)
             right = -1
             for k in range(len(xlabels)):
-                xlabels[k].text = precision % funcexp(xpoints[k])
+                xlabels[k].text = self._format_xlabel_text(funcexp(xpoints[k]))
                 # update the size so we can center the labels on ticks
                 xlabels[k].texture_update()
                 xlabels[k].size = xlabels[k].texture_size
@@ -415,27 +379,9 @@ class Graph(Widget):
         if y_overlap:
             for k in range(len(ylabels)):
                 ylabels[k].text = ''
-        return x_next - x, y_next - y, xextent - x, yextent - y
+        return x_next, y_next, xextent, yextent
 
     def _update_ticks(self, size):
-        # re-compute the positions of the bounding rectangle
-        mesh = self._mesh_rect
-        vert = mesh.vertices
-        if self.draw_border:
-            s0, s1, s2, s3 = size
-            vert[0] = s0
-            vert[1] = s1
-            vert[4] = s2
-            vert[5] = s1
-            vert[8] = s2
-            vert[9] = s3
-            vert[12] = s0
-            vert[13] = s3
-            vert[16] = s0
-            vert[17] = s1
-        else:
-            vert[0:18] = [0 for k in range(18)]
-        mesh.vertices = vert
         # re-compute the positions of the x/y axis ticks
         mesh = self._mesh_ticks
         vert = mesh.vertices
@@ -457,7 +403,7 @@ class Graph(Widget):
             xmin = log10(ymin)
             ymax = log10(ymax)
         if len(xpoints):
-            top = size[3] if self.x_grid else metrics.dp(12) + size[1]
+            top = size[3] if self.x_grid else size[1] - metrics.dp(5)
             ratio = (size[2] - size[0]) / float(xmax - xmin)
             for k in range(start, len(xpoints) + start):
                 vert[k * 8] = size[0] + (xpoints[k - start] - xmin) * ratio
@@ -475,7 +421,7 @@ class Graph(Widget):
                 vert[k * 8 + 5] = top
             start += len(xpoints2)
         if len(ypoints):
-            top = size[2] if self.y_grid else metrics.dp(12) + size[0]
+            top = size[2] if self.y_grid else size[0] - metrics.dp(5)
             ratio = (size[3] - size[1]) / float(ymax - ymin)
             for k in range(start, len(ypoints) + start):
                 vert[k * 8 + 1] = size[1] + (ypoints[k - start] - ymin) * ratio
@@ -506,7 +452,7 @@ class Graph(Widget):
     def _update_colors(self, *args):
         self._mesh_ticks_color.rgba = tuple(self.tick_color)
         self._background_color.rgba = tuple(self.background_color)
-        self._mesh_rect_color.rgba = tuple(self.border_color)
+        self._frame_color.rgba = tuple(self.border_color)
 
     def _redraw_all(self, *args):
         # add/remove all the required labels
@@ -585,19 +531,10 @@ class Graph(Widget):
         size = self._update_labels()
         self._plot_area.pos = (size[0], size[1])
         self._plot_area.size = (size[2] - size[0], size[3] - size[1])
-        self._fbo.size = self.size
-        self._fbo_rect.texture = self._fbo.texture
-        self._fbo_rect.size = self.size
-        self._fbo_rect.pos = self.pos
         self._background_rect.size = self.size
+        self._frame.rectangle = (size[0], size[1], size[2] - size[0], size[3] - size[1])
         self._update_ticks(size)
         self._update_plots(size)
-
-    def _clear_buffer(self, *largs):
-        fbo = self._fbo
-        fbo.bind()
-        fbo.clear_buffer()
-        fbo.release()
 
     def add_plot(self, plot):
         '''Add a new plot to this graph.
@@ -616,7 +553,6 @@ class Graph(Widget):
         add = self._plot_area.canvas.add
         for instr in plot.get_drawings():
             add(instr)
-        plot.bind(on_clear_plot=self._clear_buffer)
         self.plots.append(plot)
 
     def remove_plot(self, plot):
@@ -637,7 +573,6 @@ class Graph(Widget):
         remove = self._plot_area.canvas.remove
         for instr in plot.get_drawings():
             remove(instr)
-        plot.unbind(on_clear_plot=self._clear_buffer)
         self.plots.remove(plot)
     
     def collide_plot(self, x, y):
