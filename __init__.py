@@ -313,8 +313,7 @@ class Graph(Widget):
             ylabels[0].text = self._format_ylabel_text(funcexp(ypoints[0]))
             ylabels[0].texture_update()
             y1 = ylabels[0].texture_size
-            y_start = y_next + (padding + y1[1] if len(xlabels) and xlabel_grid
-                                else 0) + \
+            y_start = y_next + (padding + y1[1] if len(xlabels) and xlabel_grid else 0) + \
                                (padding + y1[1] if not y_next else 0)
             yextent = y + height - padding - y1[1] / 2.
 
@@ -331,8 +330,7 @@ class Graph(Widget):
                                                  (ypoints[k] - ymin) * ratio)))
             if len(ylabels) > 1 and ylabels[0].top > ylabels[1].y:
                 y_overlap = True
-            else:
-                x_next += y1 + padding
+            x_next += y1 + padding
         if len(xlabels) and xlabel_grid:
             funcexp = exp10 if self.xlog else identity
             funclog = log10 if self.xlog else identity
@@ -357,10 +355,9 @@ class Graph(Widget):
                     * ratio - xlabels[k].texture_size[0] / 2., y_next)))
                 if xlabels[k].x < right:
                     x_overlap = True
-                    break
+                    #break
                 right = xlabels[k].right
-            if not x_overlap:
-                y_next += padding + xlabels[0].texture_size[1]
+            y_next += padding + xlabels[0].texture_size[1]
         # now re-center the x and y axis labels
         if xlabel:
             xlabel.x = int(x_next + (xextent - x_next) / 2. - xlabel.width / 2.)
@@ -374,10 +371,10 @@ class Graph(Widget):
                     -int(ylabel.center_y),
                     0))
         if x_overlap:
-            for k in range(len(xlabels)):
+            for k in range(1, len(xlabels)-1):
                 xlabels[k].text = ''
         if y_overlap:
-            for k in range(len(ylabels)):
+            for k in range(1, len(ylabels)-1):
                 ylabels[k].text = ''
         return x_next, y_next, xextent, yextent
 
