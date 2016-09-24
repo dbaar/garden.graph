@@ -355,7 +355,6 @@ class Graph(Widget):
                     * ratio - xlabels[k].texture_size[0] / 2., y_next)))
                 if xlabels[k].x < right:
                     x_overlap = True
-                    #break
                 right = xlabels[k].right
             y_next += padding + xlabels[0].texture_size[1]
         # now re-center the x and y axis labels
